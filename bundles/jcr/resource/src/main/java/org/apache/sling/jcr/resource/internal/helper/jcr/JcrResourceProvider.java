@@ -185,13 +185,11 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
                 }
             }
         }
-        ObservationListenerSupport support = null;
         boolean closeSupport = true;
         try {
-            support = new ObservationListenerSupport(bundleCtx, repository);
             if (isOak) {
                 try {
-                    this.listener = new OakResourceListener(root, support, bundleCtx, executor, pathMapper, observationQueueLength);
+                    this.listener = new OakResourceListener(repository, root, ctx, bundleCtx, executor, pathMapper, observationQueueLength);
                     log.info("Detected Oak based repository. Using improved JCR Resource Listener with observation queue length {}", observationQueueLength);
                 } catch ( final RepositoryException re ) {
                     throw new SlingException("Can't create the OakResourceListener", re);
@@ -200,15 +198,11 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
                 }
             }
             if (this.listener == null) {
-                this.listener = new JcrResourceListener(root, support, pathMapper);
+                this.listener = new JcrResourceListener(repository, root, ctx, pathMapper);
             }
             closeSupport = false;
         } catch (RepositoryException e) {
             throw new SlingException("Can't create the listener", e);
-        } finally {
-            if ( closeSupport && support != null ) {
-                support.dispose();
-            }
         }
     }
 

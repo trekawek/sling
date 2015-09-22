@@ -22,6 +22,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
@@ -29,6 +30,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 import javax.jcr.Node;
 import javax.jcr.RepositoryException;
+import javax.jcr.Session;
 import javax.jcr.observation.Event;
 import javax.jcr.observation.EventIterator;
 import javax.jcr.observation.EventListener;
@@ -37,7 +39,10 @@ import org.apache.jackrabbit.api.observation.JackrabbitEvent;
 import org.apache.sling.api.SlingConstants;
 import org.apache.sling.api.resource.Resource;
 import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.jcr.api.SlingRepository;
 import org.apache.sling.jcr.resource.internal.helper.jcr.PathMapper;
+import org.apache.sling.spi.resource.provider.ObserverConfiguration;
+import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.osgi.service.event.EventAdmin;
 import org.osgi.service.event.EventConstants;
 import org.osgi.service.event.EventProperties;
@@ -69,7 +74,7 @@ public class JcrResourceListener implements EventListener, Closeable {
     private final LinkedBlockingQueue<Map<String, Object>> osgiEventQueue;
 
     /** Helper object. */
-    final ObservationListenerSupport support;
+    private final Session session;
 
     private final PathMapper pathMapper;
 
@@ -81,8 +86,9 @@ public class JcrResourceListener implements EventListener, Closeable {
 
     public JcrResourceListener(
                     final String mountPrefix,
-                    final ObservationListenerSupport support,
-                    final PathMapper pathMapper)
+                    final ProviderContext ctx,
+                    final PathMapper pathMapper,
+                    final SlingRepository repository)
     throws RepositoryException {
         this.pathMapper = pathMapper;
         boolean foundClass = false;
@@ -95,11 +101,12 @@ public class JcrResourceListener implements EventListener, Closeable {
         this.hasJackrabbitEventClass = foundClass;
         this.mountPrefix = (mountPrefix == null || mountPrefix.length() == 0 || mountPrefix.equals("/") ? null : mountPrefix);
 
-        this.support = support;
-        this.support.getSession().getWorkspace().getObservationManager().addEventListener(this,
-                        Event.NODE_ADDED|Event.NODE_REMOVED|Event.PROPERTY_ADDED|Event.PROPERTY_CHANGED|Event.PROPERTY_REMOVED,
-                        "/", true, null, null, false);
+        this.session = repository.loginAdministrative(repository.getDefaultWorkspace());
+        final String absPath = getAbsPath(ctx);
+        final int types = getTypes(ctx);
 
+        this.session.getWorkspace().getObservationManager().addEventListener(this, types, absPath, true, null, null, false);
+        
         this.osgiEventQueue = new LinkedBlockingQueue<Map<String,Object>>();
         final Thread oeqt = new Thread(new Runnable() {
             public void run() {
@@ -115,7 +122,7 @@ public class JcrResourceListener implements EventListener, Closeable {
     public void close() throws IOException {
         // unregister from observations
         try {
-            this.support.getSession().getWorkspace().getObservationManager().removeEventListener(this);
+            this.session.getWorkspace().getObservationManager().removeEventListener(this);
         } catch (RepositoryException e) {
             logger.warn("Unable to remove session listener: " + this, e);
         }
@@ -124,7 +131,7 @@ public class JcrResourceListener implements EventListener, Closeable {
         this.osgiEventQueue.clear();
         this.osgiEventQueue.offer(TERMINATE_PROCESSING);
 
-        this.support.dispose();
+        this.session.logout();
     }
 
     /**
@@ -400,4 +407,27 @@ public class JcrResourceListener implements EventListener, Closeable {
         }
         return false;
     }
+
+    private String getAbsPath(ProviderContext ctx) {
+        final Set<String> includePaths = new HashSet<String>();
+        final Set<String> excludePaths = new HashSet<String>();
+        for (String p : ctx.getExcludedPaths()) {
+            excludePaths.add(pathMapper.mapResourcePathToJCRPath(p));
+        }
+        for (ObserverConfiguration c : ctx.getObservationReporter().getObserverConfigurations()) {
+            for (String p : c.getExcludedPaths()) {
+                excludePaths.add(pathMapper.mapResourcePathToJCRPath(p));
+            }
+            for (String p : c.getPaths()) {
+                includePaths.add(pathMapper.mapResourcePathToJCRPath(p));
+            }
+        }
+        
+    }
+
+    private int getTypes(ProviderContext ctx) {
+        // TODO Auto-generated method stub
+        return 0;
+    }
+
 }
