@@ -44,7 +44,6 @@ import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
 import org.apache.sling.jcr.api.SlingRepository;
 import org.apache.sling.jcr.resource.internal.JcrResourceChange.Builder;
 import org.apache.sling.jcr.resource.internal.helper.jcr.PathMapper;
-import org.apache.sling.spi.resource.provider.ObservationReporter;
 import org.apache.sling.spi.resource.provider.ObserverConfiguration;
 import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.slf4j.Logger;
@@ -68,7 +67,7 @@ public class JcrResourceListener implements EventListener, Closeable {
 
     private final PathMapper pathMapper;
 
-    private final ObservationReporter reporter;
+    private final ProviderContext ctx;
 
     private final String mountPrefix;
 
@@ -84,7 +83,7 @@ public class JcrResourceListener implements EventListener, Closeable {
         this.includeExternal = isIncludeExternal(ctx);
         this.pathMapper = pathMapper;
         this.mountPrefix = mountPrefix;
-        this.reporter = ctx.getObservationReporter();
+        this.ctx = ctx;
         boolean foundClass = false;
         try {
             this.getClass().getClassLoader().loadClass(JackrabbitEvent.class.getName());
@@ -169,7 +168,8 @@ public class JcrResourceListener implements EventListener, Closeable {
         }
         buildResourceChanges(changes, removedEvents);
         buildResourceChanges(changes, changedEvents);
-        reporter.reportChanges(changes, false);
+        filterChanges(changes);
+        ctx.getObservationReporter().reportChanges(changes, false);
     }
 
     private void buildResourceChanges(List<ResourceChange> result, Map<String, Builder> builders) {
@@ -299,5 +299,24 @@ public class JcrResourceListener implements EventListener, Closeable {
             result = new StringBuilder(mountPrefix).append('/').append(path).toString();
         }
         return result;
+    }
+
+    private void filterChanges(List<ResourceChange> changes) {
+        Iterator<ResourceChange> it = changes.iterator();
+        while (it.hasNext()) {
+            String path = it.next().getPath();
+            if (isExcluded(ctx.getExcludedPaths(), path)) {
+                it.remove();
+            }
+        }
+    }
+
+    static boolean isExcluded(Set<String> excludedPaths, String path) {
+        for (String excludePath : excludedPaths) {
+            if (path.startsWith(excludePath)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

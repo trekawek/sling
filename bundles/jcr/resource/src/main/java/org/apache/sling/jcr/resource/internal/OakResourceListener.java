@@ -20,6 +20,7 @@ package org.apache.sling.jcr.resource.internal;
 
 import static org.apache.sling.jcr.resource.internal.JcrResourceListener.addMountPrefix;
 import static org.apache.sling.jcr.resource.internal.JcrResourceListener.getAbsPath;
+import static org.apache.sling.jcr.resource.internal.JcrResourceListener.isExcluded;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -39,7 +40,6 @@ import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
 import org.apache.sling.jcr.resource.internal.JcrResourceChange.Builder;
 import org.apache.sling.jcr.resource.internal.helper.jcr.PathMapper;
-import org.apache.sling.spi.resource.provider.ObservationReporter;
 import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
@@ -59,7 +59,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
 
     private final PathMapper pathMapper;
 
-    private final ObservationReporter reporter;
+    private final ProviderContext ctx;
 
     private final String mountPrefix;
 
@@ -73,7 +73,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
     throws RepositoryException {
         super(getAbsPath(pathMapper, ctx), "jcr:primaryType", "sling:resourceType", "sling:resourceSuperType");
         this.pathMapper = pathMapper;
-        this.reporter = ctx.getObservationReporter();
+        this.ctx = ctx;
         this.mountPrefix = mountPrefix;
 
         final Dictionary<String, Object> props = new Hashtable<String, Object>();
@@ -108,11 +108,14 @@ public class OakResourceListener extends NodeObserver implements Closeable {
             final Map<String, String> properties,
             final CommitInfo commitInfo) {
         final Builder builder = toEventProperties(path, added, deleted, changed, commitInfo);
+        if (isExcluded(ctx.getExcludedPaths(), builder.getPath())) {
+            return;
+        }
         builder.setChangeType(ChangeType.ADDED);
         if ( logger.isDebugEnabled() ) {
             logger.debug("added(path={}, added={}, deleted={}, changed={})", new Object[] {path, added, deleted, changed});
         }
-        reporter.reportChanges(Arrays.asList(builder.build()), false);
+        ctx.getObservationReporter().reportChanges(Arrays.asList(builder.build()), false);
     }
 
     @Override
@@ -123,11 +126,14 @@ public class OakResourceListener extends NodeObserver implements Closeable {
             final Map<String, String> properties,
             final CommitInfo commitInfo) {
         final Builder builder = toEventProperties(path, added, deleted, changed, commitInfo);
+        if (isExcluded(ctx.getExcludedPaths(), builder.getPath())) {
+            return;
+        }
         builder.setChangeType(ChangeType.REMOVED);
         if ( logger.isDebugEnabled() ) {
             logger.debug("deleted(path={}, added={}, deleted={}, changed={})", new Object[] {path, added, deleted, changed});
         }
-        reporter.reportChanges(Arrays.asList(builder.build()), false);
+        ctx.getObservationReporter().reportChanges(Arrays.asList(builder.build()), false);
     }
 
     @Override
@@ -138,11 +144,14 @@ public class OakResourceListener extends NodeObserver implements Closeable {
             final Map<String, String> properties,
             final CommitInfo commitInfo) {
         final Builder builder = toEventProperties(path, added, deleted, changed, commitInfo);
+        if (isExcluded(ctx.getExcludedPaths(), builder.getPath())) {
+            return;
+        }
         builder.setChangeType(ChangeType.CHANGED);
         if ( logger.isDebugEnabled() ) {
             logger.debug("changed(path={}, added={}, deleted={}, changed={})", new Object[] {path, added, deleted, changed});
         }
-        reporter.reportChanges(Arrays.asList(builder.build()), false);
+        ctx.getObservationReporter().reportChanges(Arrays.asList(builder.build()), false);
     }
 
     private Builder toEventProperties(final String path, final Set<String> added, final Set<String> deleted, final Set<String> changed, final CommitInfo commitInfo) {
