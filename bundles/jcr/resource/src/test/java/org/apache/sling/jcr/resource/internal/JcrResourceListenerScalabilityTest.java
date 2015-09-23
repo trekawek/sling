@@ -16,9 +16,13 @@
  */
 package org.apache.sling.jcr.resource.internal;
 
-import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+
+import java.util.Collections;
+import java.util.EnumSet;
+import java.util.List;
+import java.util.Set;
 
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
@@ -27,24 +31,28 @@ import javax.jcr.observation.Event;
 import javax.jcr.observation.EventIterator;
 import javax.jcr.observation.ObservationManager;
 
+import org.apache.sling.api.resource.observation.ResourceChange;
+import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
+import org.apache.sling.commons.testing.jcr.RepositoryUtil;
 import org.apache.sling.jcr.api.SlingRepository;
+import org.apache.sling.spi.resource.provider.ObservationReporter;
+import org.apache.sling.spi.resource.provider.ObserverConfiguration;
+import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.junit.Before;
 import org.junit.Ignore;
 import org.junit.Test;
-import org.osgi.framework.BundleContext;
 import org.osgi.framework.InvalidSyntaxException;
-import org.osgi.framework.ServiceReference;
-import org.osgi.service.event.EventAdmin;
 
 /**
- * This test case asserts that JcrResourceListener scales to an
- * arbitrary number of events.
+ * This test case asserts that JcrResourceListener scales to an arbitrary number
+ * of events.
  */
 public class JcrResourceListenerScalabilityTest {
 
     private JcrResourceListener jcrResourceListener;
     private EventIterator events;
 
+    @SuppressWarnings("deprecation")
     @Before
     public void setUp() throws RepositoryException, InvalidSyntaxException {
         ObservationManager observationManager = mock(ObservationManager.class);
@@ -58,15 +66,7 @@ public class JcrResourceListenerScalabilityTest {
         SlingRepository repository = mock(SlingRepository.class);
         when(repository.loginAdministrative(null)).thenReturn(session);
 
-        EventAdmin eventAdmin = mock(EventAdmin.class);
-        ServiceReference serviceRef = mock(ServiceReference.class);
-        ServiceReference[] serviceRefs = new ServiceReference[]{serviceRef};
-        BundleContext bundleContext = mock(BundleContext.class);
-        when(bundleContext.getServiceReferences(anyString(), anyString())).thenReturn(serviceRefs);
-        when(bundleContext.getService(serviceRef)).thenReturn(eventAdmin);
-
-        jcrResourceListener = new JcrResourceListener("/", new ObservationListenerSupport(bundleContext, repository), new PathMapperImpl());
-
+        jcrResourceListener = new JcrResourceListener(new SimpleProviderContext(), "/", new PathMapperImpl(), RepositoryUtil.getRepository());
         Event event = mock(MockEvent.class);
         events = mock(EventIterator.class);
         when(events.hasNext()).thenReturn(true);
@@ -75,7 +75,7 @@ public class JcrResourceListenerScalabilityTest {
         when(events.nextEvent()).thenReturn(event);
     }
 
-    @Ignore("SLING-3399")  // FIXME SLING-3399
+    @Ignore("SLING-3399") // FIXME SLING-3399
     @Test
     public void testManyEvents() throws RepositoryException, InterruptedException, InvalidSyntaxException {
         jcrResourceListener.onEvent(events);
@@ -86,6 +86,50 @@ public class JcrResourceListenerScalabilityTest {
 
         public String getPath() throws RepositoryException {
             return "path-" + count++;
+        }
+    }
+    
+    private static class SimpleProviderContext implements ProviderContext {
+        @Override
+        public ObservationReporter getObservationReporter() {
+            return new ObservationReporter() {
+
+                @Override
+                public void reportChanges(Iterable<ResourceChange> changes, boolean distribute) {
+                }
+
+                @Override
+                public List<ObserverConfiguration> getObserverConfigurations() {
+                    ObserverConfiguration config = new ObserverConfiguration() {
+
+                        @Override
+                        public boolean includeExternal() {
+                            return true;
+                        }
+
+                        @Override
+                        public Set<String> getPaths() {
+                            return Collections.singleton("/");
+                        }
+
+                        @Override
+                        public Set<String> getExcludedPaths() {
+                            return Collections.emptySet();
+                        }
+
+                        @Override
+                        public Set<ChangeType> getChangeTypes() {
+                            return EnumSet.allOf(ChangeType.class);
+                        }
+                    };
+                    return Collections.singletonList(config);
+                }
+            };
+        }
+
+        @Override
+        public Set<String> getExcludedPaths() {
+            return Collections.emptySet();
         }
     }
 }

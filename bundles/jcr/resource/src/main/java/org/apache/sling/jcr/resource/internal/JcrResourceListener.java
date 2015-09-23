@@ -18,17 +18,20 @@
  */
 package org.apache.sling.jcr.resource.internal;
 
+import static java.lang.Math.min;
+import static org.apache.commons.lang.StringUtils.defaultIfEmpty;
+
 import java.io.Closeable;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashSet;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
-import java.util.concurrent.LinkedBlockingQueue;
 
-import javax.jcr.Node;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.observation.Event;
@@ -36,16 +39,14 @@ import javax.jcr.observation.EventIterator;
 import javax.jcr.observation.EventListener;
 
 import org.apache.jackrabbit.api.observation.JackrabbitEvent;
-import org.apache.sling.api.SlingConstants;
-import org.apache.sling.api.resource.Resource;
-import org.apache.sling.api.resource.ResourceResolver;
+import org.apache.sling.api.resource.observation.ResourceChange;
+import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
 import org.apache.sling.jcr.api.SlingRepository;
+import org.apache.sling.jcr.resource.internal.JcrResourceChange.Builder;
 import org.apache.sling.jcr.resource.internal.helper.jcr.PathMapper;
+import org.apache.sling.spi.resource.provider.ObservationReporter;
 import org.apache.sling.spi.resource.provider.ObserverConfiguration;
 import org.apache.sling.spi.resource.provider.ProviderContext;
-import org.osgi.service.event.EventAdmin;
-import org.osgi.service.event.EventConstants;
-import org.osgi.service.event.EventProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -59,38 +60,31 @@ public class JcrResourceListener implements EventListener, Closeable {
     /** Logger */
     private final Logger logger = LoggerFactory.getLogger(JcrResourceListener.class);
 
-    /** The repository is mounted under this path. */
-    private final String mountPrefix;
-
     /** Is the Jackrabbit event class available? */
     private final boolean hasJackrabbitEventClass;
-
-    /**
-     * A queue of OSGi Events created by
-     * {@link #sendOsgiEvent(String, Event, String, EventAdmin, ChangedAttributes)}
-     * waiting for actual dispatching to the OSGi Event Admin in
-     * {@link #processOsgiEventQueue()}
-     */
-    private final LinkedBlockingQueue<Map<String, Object>> osgiEventQueue;
 
     /** Helper object. */
     private final Session session;
 
     private final PathMapper pathMapper;
 
-    /**
-     * Marker event for {@link #processOsgiEventQueue()} to be signaled to
-     * terminate processing Events.
-     */
-    private final Map<String, Object> TERMINATE_PROCESSING = new HashMap<String, Object>(1);
+    private final ObservationReporter reporter;
 
+    private final String mountPrefix;
+
+    private final boolean includeExternal;
+
+    @SuppressWarnings("deprecation")
     public JcrResourceListener(
-                    final String mountPrefix,
                     final ProviderContext ctx,
+                    final String mountPrefix,
                     final PathMapper pathMapper,
                     final SlingRepository repository)
     throws RepositoryException {
+        this.includeExternal = isIncludeExternal(ctx);
         this.pathMapper = pathMapper;
+        this.mountPrefix = mountPrefix;
+        this.reporter = ctx.getObservationReporter();
         boolean foundClass = false;
         try {
             this.getClass().getClassLoader().loadClass(JackrabbitEvent.class.getName());
@@ -99,21 +93,21 @@ public class JcrResourceListener implements EventListener, Closeable {
             // we ignore this
         }
         this.hasJackrabbitEventClass = foundClass;
-        this.mountPrefix = (mountPrefix == null || mountPrefix.length() == 0 || mountPrefix.equals("/") ? null : mountPrefix);
 
         this.session = repository.loginAdministrative(repository.getDefaultWorkspace());
-        final String absPath = getAbsPath(ctx);
+        final String absPath = getAbsPath(pathMapper, ctx);
         final int types = getTypes(ctx);
 
         this.session.getWorkspace().getObservationManager().addEventListener(this, types, absPath, true, null, null, false);
-        
-        this.osgiEventQueue = new LinkedBlockingQueue<Map<String,Object>>();
-        final Thread oeqt = new Thread(new Runnable() {
-            public void run() {
-                processOsgiEventQueue();
+    }
+
+    private boolean isIncludeExternal(ProviderContext ctx) {
+        for (ObserverConfiguration c : ctx.getObservationReporter().getObserverConfigurations()) {
+            if (c.includeExternal()) {
+                return true;
             }
-        }, "Apache Sling JCR Resource Event Queue Processor");
-        oeqt.start();
+        }
+        return false;
     }
 
     /**
@@ -128,9 +122,6 @@ public class JcrResourceListener implements EventListener, Closeable {
         }
 
         // drop any remaining OSGi Events not processed yet
-        this.osgiEventQueue.clear();
-        this.osgiEventQueue.offer(TERMINATE_PROCESSING);
-
         this.session.logout();
     }
 
@@ -138,266 +129,87 @@ public class JcrResourceListener implements EventListener, Closeable {
      * @see javax.jcr.observation.EventListener#onEvent(javax.jcr.observation.EventIterator)
      */
     public void onEvent(final EventIterator events) {
-        // if the event admin is currently not available, we just skip this
-        final EventAdmin localEA = this.support.getEventAdmin();
-        if ( localEA == null ) {
-            return;
-        }
-        final Map<String, Map<String, Object>> addedEvents = new HashMap<String, Map<String, Object>>();
-        final Map<String, ChangedAttributes> changedEvents = new HashMap<String, ChangedAttributes>();
-        final Map<String, Map<String, Object>> removedEvents = new HashMap<String, Map<String, Object>>();
+        final Map<String, Builder> addedEvents = new HashMap<String, Builder>();
+        final Map<String, Builder> changedEvents = new HashMap<String, Builder>();
+        final Map<String, Builder> removedEvents = new HashMap<String, Builder>();
         while ( events.hasNext() ) {
             final Event event = events.nextEvent();
+            if (isExternal(event) && !includeExternal) {
+                continue;
+            }
             try {
-                final String eventPath;
-                if ( this.mountPrefix != null ) {
-                    eventPath = this.mountPrefix + event.getPath();
-                } else {
-                    eventPath = event.getPath();
-                }
+                final String eventPath = event.getPath();
                 if ( event.getType() == Event.PROPERTY_ADDED
                      || event.getType() == Event.PROPERTY_REMOVED
                      || event.getType() == Event.PROPERTY_CHANGED ) {
                     final int lastSlash = eventPath.lastIndexOf('/');
                     final String nodePath = eventPath.substring(0, lastSlash);
                     final String propName = eventPath.substring(lastSlash + 1);
-                    this.updateChangedEvent(changedEvents, nodePath, event, propName);
-
+                    Builder builder = changedEvents.get(nodePath);
+                    if (builder == null) {
+                        changedEvents.put(nodePath, builder = createResourceChange(event, nodePath, ChangeType.CHANGED));
+                    }
+                    this.updateResourceChanged(builder, event.getType(), propName);
                 } else if ( event.getType() == Event.NODE_ADDED ) {
-                    addedEvents.put(eventPath, createEventProperties(event));
-
+                    addedEvents.put(eventPath, createResourceChange(event, ChangeType.ADDED));
                 } else if ( event.getType() == Event.NODE_REMOVED) {
                     // remove is the strongest operation, therefore remove all removed
                     // paths from added
                     addedEvents.remove(eventPath);
-                    removedEvents.put(eventPath, createEventProperties(event));
+                    removedEvents.put(eventPath, createResourceChange(event, ChangeType.REMOVED));
                 }
             } catch (final RepositoryException e) {
                 logger.error("Error during modification: {}", e.getMessage());
             }
         }
 
-        for (final Entry<String, Map<String, Object>> e : removedEvents.entrySet()) {
-            // Launch an OSGi event
-            sendOsgiEvent(e.getKey(), e.getValue(), SlingConstants.TOPIC_RESOURCE_REMOVED,
-                null);
+        final List<ResourceChange> changes = new ArrayList<ResourceChange>();
+        for (String path : addedEvents.keySet()) {
+            changedEvents.get(path).setChangeType(ChangeType.ADDED);
         }
+        buildResourceChanges(changes, removedEvents);
+        buildResourceChanges(changes, changedEvents);
+        reporter.reportChanges(changes, false);
+    }
 
-        for (final Entry<String, Map<String, Object>> e : addedEvents.entrySet()) {
-            // Launch an OSGi event.
-            sendOsgiEvent(e.getKey(), e.getValue(), SlingConstants.TOPIC_RESOURCE_ADDED,
-                changedEvents.remove(e.getKey()));
-        }
-
-        // Send the changed events.
-        for (final Entry<String, ChangedAttributes> e : changedEvents.entrySet()) {
-            // Launch an OSGi event.
-            sendOsgiEvent(e.getKey(), e.getValue().toEventProperties(), SlingConstants.TOPIC_RESOURCE_CHANGED, null);
+    private void buildResourceChanges(List<ResourceChange> result, Map<String, Builder> builders) {
+        for (Entry<String, Builder> e : builders.entrySet()) {
+            result.add(e.getValue().build());
         }
     }
 
-    private static final class ChangedAttributes {
-
-        private final Map<String, Object> properties;
-
-        public ChangedAttributes(final Map<String, Object> properties) {
-            this.properties = properties;
-        }
-
-        public Set<String> addedAttributes, changedAttributes, removedAttributes;
-
-        public void addEvent(final Event event, final String propName) {
-            if ( event.getType() == Event.PROPERTY_ADDED ) {
-                if ( removedAttributes != null ) {
-                    removedAttributes.remove(propName);
-                }
-                if ( addedAttributes == null ) {
-                    addedAttributes = new HashSet<String>();
-                }
-                addedAttributes.add(propName);
-            } else if ( event.getType() == Event.PROPERTY_REMOVED ) {
-                if ( addedAttributes != null ) {
-                    addedAttributes.remove(propName);
-                }
-                if ( removedAttributes == null ) {
-                    removedAttributes = new HashSet<String>();
-                }
-                removedAttributes.add(propName);
-            } else if ( event.getType() == Event.PROPERTY_CHANGED ) {
-                if ( changedAttributes == null ) {
-                    changedAttributes = new HashSet<String>();
-                }
-                changedAttributes.add(propName);
-            }
-        }
-
-        /**
-         * Merges lists of added, changed, and removed properties to the given
-         * non-{@code null} {@code properties} and returns that object.
-         *
-         * @param properties The {@code Dictionary} to add the attribute lists
-         *            to.
-         * @return The {@code properties} object is returned.
-         */
-        public final Map<String, Object> mergeAttributesInto(final Map<String, Object> properties) {
-            if ( addedAttributes != null )  {
-                properties.put(SlingConstants.PROPERTY_ADDED_ATTRIBUTES, addedAttributes.toArray(new String[addedAttributes.size()]));
-            }
-            if ( changedAttributes != null )  {
-                properties.put(SlingConstants.PROPERTY_CHANGED_ATTRIBUTES, changedAttributes.toArray(new String[changedAttributes.size()]));
-            }
-            if ( removedAttributes != null )  {
-                properties.put(SlingConstants.PROPERTY_REMOVED_ATTRIBUTES, removedAttributes.toArray(new String[removedAttributes.size()]));
-            }
-            return properties;
-        }
-
-        /**
-         * @return a {@code Dictionary} with all changes recorded including
-         *         original JCR event information.
-         */
-        public final Map<String, Object> toEventProperties() {
-            return mergeAttributesInto(properties);
+    private void updateResourceChanged(Builder builder, int eventType, final String propName) {
+        switch (eventType) {
+        case Event.PROPERTY_ADDED:
+            builder.addAddedAttributeName(propName);
+            break;
+        case Event.PROPERTY_CHANGED:
+            builder.addChangedAttributeName(propName);
+            break;
+        case Event.PROPERTY_REMOVED:
+            builder.addRemovedAttributeName(propName);
+            break;
         }
     }
 
-    private void updateChangedEvent(final Map<String, ChangedAttributes> changedEvents, final String path,
-            final Event event, final String propName) {
-        ChangedAttributes storedEvent = changedEvents.get(path);
-        if ( storedEvent == null ) {
-            storedEvent = new ChangedAttributes(createEventProperties(event));
-            changedEvents.put(path, storedEvent);
-        }
-        storedEvent.addEvent(event, propName);
-    }
-
-    /**
-     * Create the base OSGi event properties based on the JCR event object
-     */
-    private Map<String, Object> createEventProperties(final Event event) {
-        final Map<String, Object> properties = new HashMap<String, Object>();
-
-        if (this.isExternal(event)) {
-            properties.put("event.application", "unknown");
-        } else {
+    private Builder createResourceChange(final Event event, final String path, final ChangeType changeType) throws RepositoryException {
+        Builder builder = new Builder();
+        String pathWithPrefix = addMountPrefix(mountPrefix, path);
+        builder.setPath(pathMapper.mapJCRPathToResourcePath(pathWithPrefix));
+        builder.setChangeType(changeType);
+        boolean isExternal = this.isExternal(event);
+        builder.setExternal(isExternal);
+        if (!isExternal) {
             final String userID = event.getUserID();
             if (userID != null) {
-                properties.put(SlingConstants.PROPERTY_USERID, userID);
+                builder.setUserId(userID);
             }
         }
-
-        return properties;
+        return builder;
     }
 
-    /**
-     * Send an OSGi event based on a JCR Observation Event.
-     *
-     * @param path The path too the node where the event occurred.
-     * @param properties The base properties for this event.
-     * @param topic The topic that should be used for the OSGi event.
-     */
-    private void sendOsgiEvent(final String path,
-            final Map<String, Object> properties,
-            final String topic,
-            final ChangedAttributes changedAttributes) {
-
-        final String resourcePath = pathMapper.mapJCRPathToResourcePath(path);
-        if ( resourcePath != null ) {
-            if (changedAttributes != null) {
-                changedAttributes.mergeAttributesInto(properties);
-            }
-
-            // set the path (might have been changed for nt:file content)
-            properties.put(SlingConstants.PROPERTY_PATH, resourcePath);
-            properties.put(EventConstants.EVENT_TOPIC, topic);
-
-            // enqueue event for dispatching
-            this.osgiEventQueue.offer(properties);
-        } else {
-            logger.error("Dropping observation event for {}", path);
-        }
-    }
-
-    /**
-     * Called by the Runnable.run method of the JCR Event Queue processor to
-     * process the {@link #osgiEventQueue} until the
-     * {@link #TERMINATE_PROCESSING} event is received.
-     */
-    void processOsgiEventQueue() {
-        while (true) {
-            final Map<String, Object> event;
-            try {
-                event = this.osgiEventQueue.take();
-            } catch (InterruptedException e) {
-                // interrupted waiting for the event; keep on waiting
-                continue;
-            }
-
-            if (event == null || event == TERMINATE_PROCESSING) {
-                break;
-            }
-
-            try {
-                final EventAdmin localEa = this.support.getEventAdmin();
-                final ResourceResolver resolver = this.support.getResourceResolver();
-                if (localEa != null && resolver != null ) {
-                    final String topic = (String) event.remove(EventConstants.EVENT_TOPIC);
-                    final String path = (String) event.get(SlingConstants.PROPERTY_PATH);
-                    Resource resource = resolver.getResource(path);
-                    boolean sendEvent = true;
-                    if (!SlingConstants.TOPIC_RESOURCE_REMOVED.equals(topic)) {
-                        if (resource != null) {
-                            // check if this is a JCR backed resource, otherwise it is not visible!
-                            final Node node = resource.adaptTo(Node.class);
-                            if (node != null) {
-                                // check for nt:file nodes
-                                if (path.endsWith("/jcr:content")) {
-                                    try {
-                                        if (node.getParent().isNodeType("nt:file")) {
-                                            final Resource parentResource = resource.getParent();
-                                            if (parentResource != null) {
-                                                resource = parentResource;
-                                                event.put(SlingConstants.PROPERTY_PATH, resource.getPath());
-                                            }
-                                        }
-                                    } catch (final RepositoryException re) {
-                                        // ignore this
-                                    }
-                                }
-
-                                final String resourceType = resource.getResourceType();
-                                if (resourceType != null) {
-                                    event.put(SlingConstants.PROPERTY_RESOURCE_TYPE, resource.getResourceType());
-                                }
-                                final String resourceSuperType = resource.getResourceSuperType();
-                                if (resourceSuperType != null) {
-                                    event.put(SlingConstants.PROPERTY_RESOURCE_SUPER_TYPE, resource.getResourceSuperType());
-                                }
-                            } else {
-                                // this is not a jcr backed resource
-                                sendEvent = false;
-                            }
-
-                        } else {
-                            // take a quite silent note of not being able to
-                            // resolve the resource
-                            logger.debug(
-                                "processOsgiEventQueue: Resource at {} not found, which is not expected for an added or modified node",
-                                path);
-                            sendEvent = false;
-                        }
-                    }
-
-                    if ( sendEvent ) {
-                        localEa.sendEvent(new org.osgi.service.event.Event(topic, new EventProperties(event)));
-                    }
-                }
-            } catch (final Exception e) {
-                logger.warn("processOsgiEventQueue: Unexpected problem processing event " + event, e);
-            }
-        }
-
-        this.osgiEventQueue.clear();
+    private Builder createResourceChange(final Event event, final ChangeType changeType) throws RepositoryException {
+        return createResourceChange(event, event.getPath(), changeType);
     }
 
     private boolean isExternal(final Event event) {
@@ -408,26 +220,84 @@ public class JcrResourceListener implements EventListener, Closeable {
         return false;
     }
 
-    private String getAbsPath(ProviderContext ctx) {
-        final Set<String> includePaths = new HashSet<String>();
-        final Set<String> excludePaths = new HashSet<String>();
-        for (String p : ctx.getExcludedPaths()) {
-            excludePaths.add(pathMapper.mapResourcePathToJCRPath(p));
-        }
+    static String getAbsPath(PathMapper pathMapper, ProviderContext ctx) {
+        final Set<String> paths = new HashSet<String>();
         for (ObserverConfiguration c : ctx.getObservationReporter().getObserverConfigurations()) {
+            final Set<String> includePaths = new HashSet<String>();
+            final Set<String> excludePaths = new HashSet<String>();
             for (String p : c.getExcludedPaths()) {
                 excludePaths.add(pathMapper.mapResourcePathToJCRPath(p));
             }
             for (String p : c.getPaths()) {
                 includePaths.add(pathMapper.mapResourcePathToJCRPath(p));
             }
+            includePaths.removeAll(excludePaths);
+            paths.addAll(includePaths);
         }
-        
+        for (String p : ctx.getExcludedPaths()) {
+            paths.remove(pathMapper.mapResourcePathToJCRPath(p));
+        }
+        return getLongestCommonPrefix(paths);
+    }
+
+    private static String getLongestCommonPrefix(Set<String> paths) {
+        String prefix = null;
+        Iterator<String> it = paths.iterator();
+        if (it.hasNext()) {
+            prefix = it.next();
+        }
+        while (it.hasNext()) {
+            prefix = getCommonPrefix(prefix, it.next());
+        }
+        return defaultIfEmpty(prefix, "/");
+    }
+
+    private static String getCommonPrefix(String s1, String s2) {
+        int length = min(s1.length(), s2.length());
+        StringBuilder prefix = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            if (s1.charAt(i) == s2.charAt(i)) {
+                prefix.append(s1.charAt(i));
+            } else {
+                break;
+            }
+        }
+        return prefix.toString();
     }
 
     private int getTypes(ProviderContext ctx) {
-        // TODO Auto-generated method stub
-        return 0;
+        int result = 0;
+        for (ObserverConfiguration c : ctx.getObservationReporter().getObserverConfigurations()) {
+            for (ChangeType t : c.getChangeTypes()) {
+                switch (t) {
+                case ADDED:
+                    result = result | Event.NODE_ADDED;
+                    break;
+                case REMOVED:
+                    result = result | Event.NODE_REMOVED;
+                    break;
+                case CHANGED:
+                    result = result | Event.PROPERTY_ADDED;
+                    result = result | Event.PROPERTY_CHANGED;
+                    result = result | Event.PROPERTY_REMOVED;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+        return result;
     }
 
+    static String addMountPrefix(final String mountPrefix, final String path) {
+        final String result;
+        if (mountPrefix == null || mountPrefix.isEmpty() || "/".equals(mountPrefix)) {
+            result = path;
+        } else if (mountPrefix.endsWith("/")) {
+            result = path;
+        } else {
+            result = new StringBuilder(mountPrefix).append('/').append(path).toString();
+        }
+        return result;
+    }
 }
