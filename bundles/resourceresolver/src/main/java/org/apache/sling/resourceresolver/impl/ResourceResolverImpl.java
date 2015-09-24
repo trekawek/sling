@@ -141,12 +141,12 @@ public class ResourceResolverImpl extends SlingAdaptable implements ResourceReso
     private StatefulResourceProvider createProvider(List<ResourceProviderHandler> handlers) throws LoginException {
         List<StatefulResourceProvider> authenticated = new ArrayList<StatefulResourceProvider>();
         for (ResourceProviderHandler h : handlers) {
-            ResourceProvider<?> rp = h.getResourceProvider();
+            ResourceProvider<?> rp = h.getProvider();
             if (rp == null) {
                 logger.warn("Empty resource provider for {}", h);
                 continue;
             }
-            authenticated.add(new AuthenticatedResourceProvider(h.getResourceProvider(), h.getInfo(), this, authenticationInfo));
+            authenticated.add(new AuthenticatedResourceProvider(rp, h.getInfo(), this, authenticationInfo));
         }
         List<StatefulResourceProvider> secured = new ArrayList<StatefulResourceProvider>();
         for (StatefulResourceProvider p : authenticated) {

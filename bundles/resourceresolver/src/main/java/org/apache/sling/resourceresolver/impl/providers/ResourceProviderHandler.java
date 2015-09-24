@@ -18,11 +18,15 @@
  */
 package org.apache.sling.resourceresolver.impl.providers;
 
+import java.util.Collections;
 import java.util.Dictionary;
 import java.util.Hashtable;
 
 import org.apache.sling.api.SlingConstants;
+import org.apache.sling.api.resource.observation.ResourceChange;
+import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
 import org.apache.sling.resourceresolver.impl.legacy.LegacyResourceProviderWhiteboard;
+import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.apache.sling.spi.resource.provider.ResourceProvider;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
@@ -49,21 +53,34 @@ public class ResourceProviderHandler implements Comparable<ResourceProviderHandl
         return this.info;
     }
 
-    public ResourceProvider<?> getResourceProvider() {
-        ResourceProvider<?> rp = this.provider;
-        if ( rp == null ) {
-            synchronized ( this ) {
-                if ( this.provider == null ) {
-                    this.provider = (ResourceProvider<?>) this.bundleContext.getService(this.info.getServiceReference());
-                }
-                rp = this.provider;
-                postEvent(SlingConstants.TOPIC_RESOURCE_PROVIDER_ADDED);
-            }
-        }
-        return rp;
+    public ResourceProvider<?> getProvider() {
+        return this.provider;
     }
 
-    private void postEvent(String topic) {
+    public boolean activate(ProviderContext context) {
+        if (this.provider == null) {
+            synchronized (this) {
+                if (this.provider == null) {
+                    this.provider = (ResourceProvider<?>) this.bundleContext
+                            .getService(this.info.getServiceReference());
+                }
+                postResourceChange(ChangeType.PROVIDER_ADDED, context);
+                postOsgiEvent(SlingConstants.TOPIC_RESOURCE_PROVIDER_ADDED);
+            }
+        }
+        return this.provider != null;
+    }
+
+    public void deactivate(ProviderContext context) {
+        if ( this.provider != null ) {
+            this.provider = null;
+            this.bundleContext.ungetService(this.info.getServiceReference());
+            postResourceChange(ChangeType.PROVIDER_REMOVED, context);
+            postOsgiEvent(SlingConstants.TOPIC_RESOURCE_PROVIDER_REMOVED);
+        }
+    }
+
+    private void postOsgiEvent(String topic) {
         final Dictionary<String, Object> eventProps = new Hashtable<String, Object>();
         eventProps.put(SlingConstants.PROPERTY_PATH, info.getPath());
         String pid = (String) info.getServiceReference().getProperty(Constants.SERVICE_PID);
@@ -76,16 +93,22 @@ public class ResourceProviderHandler implements Comparable<ResourceProviderHandl
         eventAdmin.postEvent(new Event(topic, eventProps));
     }
 
-    public void deactivate() {
-        if ( this.provider != null ) {
-            this.provider = null;
-            this.bundleContext.ungetService(this.info.getServiceReference());
-            postEvent(SlingConstants.TOPIC_RESOURCE_PROVIDER_REMOVED);
+    private void postResourceChange(ChangeType type, ProviderContext ctx) {
+        if (ctx == null) {
+            return;
         }
+        ResourceChange change = new ProviderResourceChange(type);
+        ctx.getObservationReporter().reportChanges(Collections.singletonList(change), false);
     }
 
     @Override
     public int compareTo(final ResourceProviderHandler o) {
         return this.getInfo().compareTo(o.getInfo());
+    }
+    
+    private class ProviderResourceChange extends ResourceChange {
+        public ProviderResourceChange(ChangeType changeType) {
+            super(changeType, getInfo().getPath(), false);
+        }
     }
 }

@@ -32,12 +32,15 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import javax.jcr.Node;
+import javax.jcr.PathNotFoundException;
 import javax.jcr.RepositoryException;
 import javax.jcr.Session;
 import javax.jcr.observation.Event;
 import javax.jcr.observation.EventIterator;
 import javax.jcr.observation.EventListener;
 
+import org.apache.jackrabbit.JcrConstants;
 import org.apache.jackrabbit.api.observation.JackrabbitEvent;
 import org.apache.sling.api.resource.observation.ResourceChange;
 import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
@@ -194,7 +197,13 @@ public class JcrResourceListener implements EventListener, Closeable {
 
     private Builder createResourceChange(final Event event, final String path, final ChangeType changeType) throws RepositoryException {
         Builder builder = new Builder();
-        String pathWithPrefix = addMountPrefix(mountPrefix, path);
+        String strippedPath;
+        if (event.getType() == Event.NODE_REMOVED) {
+            strippedPath = path;
+        } else {
+            strippedPath = stripNtFilePath(path, session);
+        }
+        String pathWithPrefix = addMountPrefix(mountPrefix, strippedPath);
         builder.setPath(pathMapper.mapJCRPathToResourcePath(pathWithPrefix));
         builder.setChangeType(changeType);
         boolean isExternal = this.isExternal(event);
@@ -293,10 +302,8 @@ public class JcrResourceListener implements EventListener, Closeable {
         final String result;
         if (mountPrefix == null || mountPrefix.isEmpty() || "/".equals(mountPrefix)) {
             result = path;
-        } else if (mountPrefix.endsWith("/")) {
-            result = path;
         } else {
-            result = new StringBuilder(mountPrefix).append('/').append(path).toString();
+            result = new StringBuilder(mountPrefix).append(path).toString();
         }
         return result;
     }
@@ -318,5 +325,28 @@ public class JcrResourceListener implements EventListener, Closeable {
             }
         }
         return false;
+    }
+
+    static String stripNtFilePath(String path, Session session) {
+        if (!path.endsWith("/" + JcrConstants.JCR_CONTENT)) {
+            return path;
+        }
+        try {
+            Node node;
+            try {
+                node = session.getNode(path);
+            } catch(PathNotFoundException e) {
+                session.refresh(false);
+                node = session.getNode(path);
+            }
+            Node parent = node.getParent();
+            if (parent.isNodeType(JcrConstants.NT_FILE)) {
+                return parent.getPath();
+            } else {
+                return path;
+            }
+        } catch (RepositoryException e) {
+            return path;
+        }
     }
 }

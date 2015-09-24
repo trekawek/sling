@@ -21,6 +21,7 @@ package org.apache.sling.jcr.resource.internal;
 import static org.apache.sling.jcr.resource.internal.JcrResourceListener.addMountPrefix;
 import static org.apache.sling.jcr.resource.internal.JcrResourceListener.getAbsPath;
 import static org.apache.sling.jcr.resource.internal.JcrResourceListener.isExcluded;
+import static org.apache.sling.jcr.resource.internal.JcrResourceListener.stripNtFilePath;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -32,12 +33,14 @@ import java.util.Set;
 import java.util.concurrent.Executor;
 
 import javax.jcr.RepositoryException;
+import javax.jcr.Session;
 
 import org.apache.jackrabbit.oak.plugins.observation.NodeObserver;
 import org.apache.jackrabbit.oak.spi.commit.BackgroundObserver;
 import org.apache.jackrabbit.oak.spi.commit.CommitInfo;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
+import org.apache.sling.jcr.api.SlingRepository;
 import org.apache.sling.jcr.resource.internal.JcrResourceChange.Builder;
 import org.apache.sling.jcr.resource.internal.helper.jcr.PathMapper;
 import org.apache.sling.spi.resource.provider.ProviderContext;
@@ -63,18 +66,23 @@ public class OakResourceListener extends NodeObserver implements Closeable {
 
     private final String mountPrefix;
 
+    private final Session session;
+
+    @SuppressWarnings("deprecation")
     public OakResourceListener(
             final String mountPrefix,
             final ProviderContext ctx,
             final BundleContext bundleContext,
             final Executor executor,
             final PathMapper pathMapper,
-            final int observationQueueLength)
+            final int observationQueueLength,
+            final SlingRepository repository)
     throws RepositoryException {
         super(getAbsPath(pathMapper, ctx), "jcr:primaryType", "sling:resourceType", "sling:resourceSuperType");
         this.pathMapper = pathMapper;
         this.ctx = ctx;
         this.mountPrefix = mountPrefix;
+        this.session = repository.loginAdministrative(repository.getDefaultWorkspace());
 
         final Dictionary<String, Object> props = new Hashtable<String, Object>();
         props.put(Constants.SERVICE_VENDOR, "The Apache Software Foundation");
@@ -98,6 +106,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
     @Override
     public void close() throws IOException {
         serviceRegistration.unregister();
+        session.logout();
     }
 
     @Override
@@ -107,7 +116,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
             final Set<String> changed,
             final Map<String, String> properties,
             final CommitInfo commitInfo) {
-        final Builder builder = toEventProperties(path, added, deleted, changed, commitInfo);
+        final Builder builder = toEventProperties(stripNtFilePath(path, session), added, deleted, changed, commitInfo);
         if (isExcluded(ctx.getExcludedPaths(), builder.getPath())) {
             return;
         }
@@ -143,7 +152,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
             final Set<String> changed,
             final Map<String, String> properties,
             final CommitInfo commitInfo) {
-        final Builder builder = toEventProperties(path, added, deleted, changed, commitInfo);
+        final Builder builder = toEventProperties(stripNtFilePath(path, session), added, deleted, changed, commitInfo);
         if (isExcluded(ctx.getExcludedPaths(), builder.getPath())) {
             return;
         }

@@ -28,7 +28,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import javax.jcr.Repository;
-import javax.jcr.Session;
 
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.jcr.Jcr;
@@ -84,7 +83,7 @@ public class OakResourceListenerTest extends AbstractListenerTest {
             public Set<String> getExcludedPaths() {
                 return Collections.emptySet();
             }
-        }, bundleContext, executor, new PathMapperImpl(), 1000); 
+        }, bundleContext, executor, new PathMapperImpl(), 1000, slingRepository); 
     }
 
     @After
