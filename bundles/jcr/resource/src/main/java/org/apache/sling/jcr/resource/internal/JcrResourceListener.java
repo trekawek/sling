@@ -19,6 +19,11 @@
 package org.apache.sling.jcr.resource.internal;
 
 import static java.lang.Math.min;
+import static javax.jcr.observation.Event.NODE_ADDED;
+import static javax.jcr.observation.Event.NODE_REMOVED;
+import static javax.jcr.observation.Event.PROPERTY_ADDED;
+import static javax.jcr.observation.Event.PROPERTY_CHANGED;
+import static javax.jcr.observation.Event.PROPERTY_REMOVED;
 import static org.apache.commons.lang.StringUtils.defaultIfEmpty;
 
 import java.io.Closeable;
@@ -141,9 +146,10 @@ public class JcrResourceListener implements EventListener, Closeable {
             }
             try {
                 final String eventPath = event.getPath();
-                if ( event.getType() == Event.PROPERTY_ADDED
-                     || event.getType() == Event.PROPERTY_REMOVED
-                     || event.getType() == Event.PROPERTY_CHANGED ) {
+                final int type = event.getType();
+                if ( type == PROPERTY_ADDED
+                     || type == PROPERTY_REMOVED
+                     || type == PROPERTY_CHANGED ) {
                     final int lastSlash = eventPath.lastIndexOf('/');
                     final String nodePath = eventPath.substring(0, lastSlash);
                     final String propName = eventPath.substring(lastSlash + 1);
@@ -152,22 +158,29 @@ public class JcrResourceListener implements EventListener, Closeable {
                         changedEvents.put(nodePath, builder = createResourceChange(event, nodePath, ChangeType.CHANGED));
                     }
                     this.updateResourceChanged(builder, event.getType(), propName);
-                } else if ( event.getType() == Event.NODE_ADDED ) {
+                } else if ( type == NODE_ADDED ) {
                     addedEvents.put(eventPath, createResourceChange(event, ChangeType.ADDED));
-                } else if ( event.getType() == Event.NODE_REMOVED) {
+                } else if ( type == NODE_REMOVED) {
                     // remove is the strongest operation, therefore remove all removed
                     // paths from added
                     addedEvents.remove(eventPath);
                     removedEvents.put(eventPath, createResourceChange(event, ChangeType.REMOVED));
                 }
             } catch (final RepositoryException e) {
-                logger.error("Error during modification: {}", e.getMessage());
+                logger.error("Error during modification: {}", e);
             }
         }
 
         final List<ResourceChange> changes = new ArrayList<ResourceChange>();
-        for (String path : addedEvents.keySet()) {
-            changedEvents.get(path).setChangeType(ChangeType.ADDED);
+        for (Entry<String, Builder> e : addedEvents.entrySet()) {
+            String path = e.getKey();
+            if (changedEvents.containsKey(path)) {
+                Builder builder = changedEvents.remove(path);
+                builder.setChangeType(ChangeType.ADDED);
+                changes.add(builder.build());
+            } else {
+                changes.add(e.getValue().build());
+            }
         }
         buildResourceChanges(changes, removedEvents);
         buildResourceChanges(changes, changedEvents);
