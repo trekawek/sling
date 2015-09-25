@@ -43,12 +43,16 @@ import org.apache.sling.api.resource.observation.ResourceChange.ChangeType;
 import org.apache.sling.api.resource.observation.ResourceChangeListener;
 import org.osgi.service.event.Event;
 import org.osgi.service.event.EventAdmin;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Component
 @Service(ResourceChangeListener.class)
 @Properties({ @Property(name = ResourceChangeListener.CHANGES, value = { "ADDED", "CHANGED", "REMOVED" }),
         @Property(name = ResourceChangeListener.PATHS, value = ".") })
 public class OsgiObservationBridge implements ResourceChangeListener, ExternalResourceListener {
+
+    private static final Logger logger = LoggerFactory.getLogger(OsgiObservationBridge.class);
 
     @Reference
     private EventAdmin eventAdmin;
@@ -130,7 +134,7 @@ public class OsgiObservationBridge implements ResourceChangeListener, ExternalRe
             }
         }
 
-        Event event = new Event(topic, props);
+        final Event event = new Event(topic, props);
         eventAdmin.sendEvent(event);
     }
 
@@ -147,10 +151,19 @@ public class OsgiObservationBridge implements ResourceChangeListener, ExternalRe
         @Override
         public void run() {
             while (!stop) {
+                ResourceChange change = null;
                 try {
-                    sendOsgiEvent(changes.poll(100, TimeUnit.MILLISECONDS));
+                    change = changes.poll(100, TimeUnit.MILLISECONDS);
                 } catch (InterruptedException e) {
-                    break;
+                    logger.warn("Interrupted the OSGi runnable", e);
+                }
+                if (change == null) {
+                    continue;
+                }
+                try {
+                    sendOsgiEvent(change);
+                } catch (Exception e) {
+                    logger.error("processOsgiEventQueue: Unexpected problem processing resource change {}", change, e);
                 }
             }
         }
