@@ -106,11 +106,6 @@ public class AuthenticatedResourceProvider implements StatefulResourceProvider {
     }
 
     @Override
-    public ResourceProviderInfo getInfo() {
-        return info;
-    }
-
-    @Override
     public void logout() {
         if (authenticated) {
             rp.logout(getContext().getProviderState());

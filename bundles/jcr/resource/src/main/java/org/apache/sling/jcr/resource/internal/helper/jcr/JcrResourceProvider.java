@@ -30,6 +30,7 @@ import java.util.concurrent.Executor;
 
 import javax.annotation.CheckForNull;
 import javax.annotation.Nonnull;
+import javax.jcr.AccessDeniedException;
 import javax.jcr.Item;
 import javax.jcr.Node;
 import javax.jcr.Repository;
@@ -77,7 +78,13 @@ import org.slf4j.LoggerFactory;
 @Properties({ @Property(name = ResourceProvider.PROPERTY_NAME, value = "JCR"),
         @Property(name = ResourceProvider.PROPERTY_ROOT, value = "/"),
         @Property(name = ResourceProvider.PROPERTY_MODIFIABLE, boolValue = true),
-        @Property(name = ResourceProvider.PROPERTY_AUTHENTICATE, value = ResourceProvider.AUTHENTICATE_REQUIRED) })
+        @Property(name = ResourceProvider.PROPERTY_ADAPTABLE, boolValue = true),
+        @Property(name = ResourceProvider.PROPERTY_AUTHENTICATE, value = ResourceProvider.AUTHENTICATE_REQUIRED),
+        @Property(name = ResourceProvider.PROPERTY_ATTRIBUTABLE, boolValue = true),
+        @Property(name = ResourceProvider.PROPERTY_REFRESHABLE, boolValue = true),
+        @Property(name = ResourceProvider.PROPERTY_SUPPORTS_JCR_QUERY, boolValue = true),
+        @Property(name = ResourceProvider.PROPERTY_SUPPORTS_NATIVE_QUERY, boolValue = false)
+})
 public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
 
     /** Logger */
@@ -133,6 +140,8 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
 
     private BundleContext bundleCtx;
 
+    private JcrProviderStateFactory stateFactory;
+
     @Activate
     protected void activate(final ComponentContext context) throws RepositoryException {
         SlingRepository repository = (SlingRepository) context.locateService(REPOSITORY_REFERNENCE_NAME,
@@ -150,6 +159,9 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
         this.optimizeForOak = PropertiesUtil.toBoolean(context.getProperties().get(PROPERTY_OPTIMIZE_FOR_OAK), DEFAULT_OPTIMIZE_FOR_OAK);
         this.root = PropertiesUtil.toString(context.getProperties().get(ResourceProvider.PROPERTY_ROOT), "/");
         this.bundleCtx = context.getBundleContext();
+
+        HelperData helperData = new HelperData(dynamicClassLoaderManager.getDynamicClassLoader(), pathMapper);
+        this.stateFactory = new JcrProviderStateFactory(repositoryReference, repository, helperData);
     }
     
     @Deactivate
@@ -236,9 +248,7 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
     @Override
     @Nonnull public JcrProviderState authenticate(final @Nonnull Map<String, Object> authenticationInfo)
     throws LoginException {
-        HelperData helperData = new HelperData(dynamicClassLoaderManager.getDynamicClassLoader(), pathMapper);
-        JcrProviderStateFactory factory = new JcrProviderStateFactory(repositoryReference, repository, helperData);
-        return factory.createProviderState(authenticationInfo);
+        return stateFactory.createProviderState(authenticationInfo);
     }
 
     @Override
@@ -298,7 +308,12 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
                     if ("/".equals(item.getPath())) {
                         return null;
                     }
-                    Node parentNode = item.getParent();
+                    Node parentNode;
+                    try {
+                        parentNode = item.getParent();
+                    } catch(AccessDeniedException e) {
+                        return null;
+                    }
                     String parentPath = pathMapper.mapJCRPathToResourcePath(parentNode.getPath());
                     return new JcrNodeResource(ctx.getResourceResolver(), parentPath, version, parentNode,
                             ctx.getProviderState().getHelperData());

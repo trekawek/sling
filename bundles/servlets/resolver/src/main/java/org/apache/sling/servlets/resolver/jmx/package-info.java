@@ -16,28 +16,9 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.sling.scripting.thymeleaf.internal.processor.attr;
 
-public final class SlingUnwrapAttrProcessor extends SlingNodePropertyAttrProcessor {
+@Version("2.3.6")
+package org.apache.sling.servlets.resolver.jmx;
 
-    public static final int ATTR_PRECEDENCE = 99;
+import aQute.bnd.annotation.Version;
 
-    public static final String ATTR_NAME = "unwrap";
-
-    public static final String NODE_PROPERTY_NAME = String.format("%s.%s", PREFIX, ATTR_NAME);
-
-    public SlingUnwrapAttrProcessor() {
-        super(ATTR_NAME);
-    }
-
-    @Override
-    public int getPrecedence() {
-        return ATTR_PRECEDENCE;
-    }
-
-    @Override
-    protected String getNodePropertyName() {
-        return NODE_PROPERTY_NAME;
-    }
-
-}

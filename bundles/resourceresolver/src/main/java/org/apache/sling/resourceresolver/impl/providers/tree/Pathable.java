@@ -16,19 +16,10 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.sling.scripting.thymeleaf.internal.dom;
+package org.apache.sling.resourceresolver.impl.providers.tree;
 
-import org.thymeleaf.dom.Node;
+public interface Pathable {
 
-public final class NodeUtil {
-
-    public static <T> T getNodeProperty(final Node node, final String name, final Class<T> clazz) {
-        final Object nodeProperty = node.getNodeProperty(name);
-        try {
-            return clazz.cast(nodeProperty);
-        } catch (ClassCastException e) {
-            return null;
-        }
-    }
+    String getPath();
 
 }
