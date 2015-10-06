@@ -184,9 +184,6 @@ public class OakResourceListener extends NodeObserver implements Closeable {
         }
         builder.setUserId(commitInfo.getUserId());
         builder.setExternal(false);
-        //if (commitInfo == CommitInfo.EMPTY) {
-        //    changes.put("event.application", "unknown");
-        //}
         return builder;
     }
 }

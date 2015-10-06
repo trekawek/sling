@@ -133,6 +133,9 @@ public class OsgiObservationBridge implements ResourceChangeListener, ExternalRe
                 }
             }
         }
+        if (change.isExternal()) {
+            props.put("event.application", "unknown");
+        }
 
         final Event event = new Event(topic, props);
         eventAdmin.sendEvent(event);
