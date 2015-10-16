@@ -222,22 +222,21 @@ public class CombinedResourceProvider implements StatefulResourceProvider {
     @SuppressWarnings("unchecked")
     @Override
     public Iterator<Resource> listChildren(final Resource parent) {
-        Iterator<Iterator<Resource>> iterators = transformedIterator(getMatchingProviders(parent.getPath()).iterator(),
-                new Transformer() {
-                    @Override
-                    public Object transform(Object input) {
-                        StatefulResourceProvider rp = (StatefulResourceProvider) input;
-                        Iterator<Resource> it = rp.listChildren(parent);
-                        if (it == null) {
-                            it = IteratorUtils.emptyIterator();
-                        }
-                        return it;
-                    }
-                });
-        Iterator<Resource> allChildren = new ChainedIterator<Resource>(iterators);
+        Iterator<Resource> realChildren = null;
+        for (StatefulResourceProvider p : getMatchingProviders(parent.getPath())) {
+            realChildren = p.listChildren(parent);
+            if (realChildren != null) {
+                break;
+            }
+        }
         Iterator<Resource> syntheticChildren = getSyntheticChildren(parent).iterator();
-        Iterator<Resource> uniqueChildren = new UniqueIterator(chainedIterator(allChildren, syntheticChildren));
-        return transformedIterator(uniqueChildren, new Transformer() {
+        Iterator<Resource> allChildren;
+        if (realChildren == null) {
+            allChildren = syntheticChildren;
+        } else {
+            allChildren = new UniqueIterator(chainedIterator(realChildren, syntheticChildren));
+        } 
+        return transformedIterator(allChildren, new Transformer() {
             @Override
             public Object transform(Object input) {
                 Resource resource = (Resource) input;
@@ -471,7 +470,7 @@ public class CombinedResourceProvider implements StatefulResourceProvider {
     @Override
     public boolean copy(String srcAbsPath, String destAbsPath) throws PersistenceException {
         List<StatefulResourceProvider> srcProviders = getMatchingProviders(srcAbsPath);
-        List<StatefulResourceProvider> dstProviders = getMatchingModifiableProviders(srcAbsPath);
+        List<StatefulResourceProvider> dstProviders = getMatchingModifiableProviders(destAbsPath);
         @SuppressWarnings("unchecked")
         List<StatefulResourceProvider> intersection = ListUtils.intersection(srcProviders, dstProviders);
         for (StatefulResourceProvider p : intersection) {
@@ -490,7 +489,7 @@ public class CombinedResourceProvider implements StatefulResourceProvider {
     @Override
     public boolean move(String srcAbsPath, String destAbsPath) throws PersistenceException {
         List<StatefulResourceProvider> srcProviders = getMatchingModifiableProviders(srcAbsPath);
-        List<StatefulResourceProvider> dstProviders = getMatchingModifiableProviders(srcAbsPath);
+        List<StatefulResourceProvider> dstProviders = getMatchingModifiableProviders(destAbsPath);
         @SuppressWarnings("unchecked")
         List<StatefulResourceProvider> intersection = ListUtils.intersection(srcProviders, dstProviders);
         for (StatefulResourceProvider p : intersection) {
@@ -502,17 +501,19 @@ public class CombinedResourceProvider implements StatefulResourceProvider {
     }
 
     private List<StatefulResourceProvider> getMatchingProviders(String path) {
-        List<StatefulResourceProvider> matching = new ArrayList<StatefulResourceProvider>();
-        for (ResourceProviderHandler h : storage.getTree().getMatchingNodes(path)) {
-            matching.add(authenticator.getStateful(h));
+        List<ResourceProviderHandler> handlers = storage.getTree().getMatchingNodes(path);
+        StatefulResourceProvider[] matching = new StatefulResourceProvider[handlers.size()];
+        int i = matching.length - 1;
+        for (ResourceProviderHandler h : handlers) {
+            matching[i--] = authenticator.getStateful(h); // reverse order
         }
-        Collections.reverse(matching);
-        return matching;
+        return Arrays.asList(matching);
     }
 
     private List<StatefulResourceProvider> getMatchingModifiableProviders(String path) {
-        List<StatefulResourceProvider> matching = new ArrayList<StatefulResourceProvider>();
-        for (ResourceProviderHandler h : storage.getTree().getMatchingNodes(path)) {
+        List<ResourceProviderHandler> handlers = storage.getTree().getMatchingNodes(path);
+        List<StatefulResourceProvider> matching = new ArrayList<StatefulResourceProvider>(handlers.size());
+        for (ResourceProviderHandler h : handlers) {
             if (h.getInfo().getModifiable()) {
                 matching.add(authenticator.getStateful(h));
             }
