@@ -58,6 +58,7 @@ public class ResourceProviderHandler implements Comparable<ResourceProviderHandl
         return this.provider;
     }
 
+    @SuppressWarnings("deprecation")
     public boolean activate(ProviderContext context) {
         if (this.provider == null) {
             synchronized (this) {
@@ -72,6 +73,7 @@ public class ResourceProviderHandler implements Comparable<ResourceProviderHandl
         return this.provider != null;
     }
 
+    @SuppressWarnings("deprecation")
     public void deactivate(ProviderContext context) {
         if ( this.provider != null ) {
             this.provider = null;
