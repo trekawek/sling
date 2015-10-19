@@ -85,6 +85,7 @@ public class OsgiObservationBridge implements ResourceChangeListener, ExternalRe
         changesQueue.addAll(changes);
     }
 
+    @SuppressWarnings("deprecation")
     private void sendOsgiEvent(ResourceChange change) {
         Dictionary<String, Object> props = new Hashtable<String, Object>();
         String topic;
