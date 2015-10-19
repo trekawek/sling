@@ -268,7 +268,7 @@ public class SlingConstants {
      * The event contains at least the {@link #PROPERTY_PATH}, {@link #PROPERTY_RESOURCE_SUPER_TYPE}
      * and {@link #PROPERTY_RESOURCE_TYPE} properties.
      * @since 2.0.6 (Sling API Bundle 2.0.6)
-     * @deprecated OSGi events for resource changes are deprecated. Use {@link ResourceChangeListener}.
+     * @deprecated OSGi events for resource changes are deprecated as in SLING-5169. Use {@link ResourceChangeListener}.
      */
     @Deprecated
     public static final String TOPIC_RESOURCE_ADDED = "org/apache/sling/api/resource/Resource/ADDED";
@@ -279,7 +279,7 @@ public class SlingConstants {
      * The event contains at least the {@link #PROPERTY_PATH}. As the resource has already been removed
      * no further information like resource type etc. might be available.
      * @since 2.0.6 (Sling API Bundle 2.0.6)
-     * @deprecated OSGi events for resource changes are deprecated. Use {@link ResourceChangeListener}.
+     * @deprecated OSGi events for resource changes are deprecated as in SLING-5169. Use {@link ResourceChangeListener}.
      */
     @Deprecated
     public static final String TOPIC_RESOURCE_REMOVED = "org/apache/sling/api/resource/Resource/REMOVED";
@@ -293,7 +293,7 @@ public class SlingConstants {
      * {@link #PROPERTY_REMOVED_ATTRIBUTES}, {@link #PROPERTY_CHANGED_ATTRIBUTES}. All of them are
      * optional.
      * @since 2.0.6 (Sling API Bundle 2.0.6)
-     * @deprecated OSGi events for resource changes are deprecated. Use {@link ResourceChangeListener}.
+     * @deprecated OSGi events for resource changes are deprecated as in SLING-5169. Use {@link ResourceChangeListener}.
      */
     @Deprecated
     public static final String TOPIC_RESOURCE_CHANGED = "org/apache/sling/api/resource/Resource/CHANGED";
@@ -303,7 +303,7 @@ public class SlingConstants {
      * added to the resource tree.
      * The event contains at least the {@link #PROPERTY_PATH} property.
      * @since 2.0.6 (Sling API Bundle 2.0.6)
-     * @deprecated OSGi events for resource changes are deprecated. Use {@link ResourceChangeListener}.
+     * @deprecated OSGi events for resource changes are deprecated as in SLING-5169. Use {@link ResourceChangeListener}.
      */
     @Deprecated
     public static final String TOPIC_RESOURCE_PROVIDER_ADDED = "org/apache/sling/api/resource/ResourceProvider/ADDED";
@@ -313,7 +313,7 @@ public class SlingConstants {
      * removed from the resource tree.
      * The event contains at least the {@link #PROPERTY_PATH} property.
      * @since 2.0.6 (Sling API Bundle 2.0.6)
-     * @deprecated OSGi events for resource changes are deprecated. Use {@link ResourceChangeListener}.
+     * @deprecated OSGi events for resource changes are deprecated as in SLING-5169. Use {@link ResourceChangeListener}.
      */
     @Deprecated
     public static final String TOPIC_RESOURCE_PROVIDER_REMOVED = "org/apache/sling/api/resource/ResourceProvider/REMOVED";
