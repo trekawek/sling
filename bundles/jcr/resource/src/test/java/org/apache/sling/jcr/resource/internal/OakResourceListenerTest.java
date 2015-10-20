@@ -18,37 +18,32 @@ package org.apache.sling.jcr.resource.internal;
 
 import static org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils.registerObserver;
 import static org.mockito.Matchers.any;
-import static org.mockito.Matchers.anyMap;
-import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.util.Collections;
 import java.util.Dictionary;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 import javax.jcr.Repository;
-import javax.jcr.Session;
 
 import org.apache.jackrabbit.oak.Oak;
 import org.apache.jackrabbit.oak.jcr.Jcr;
 import org.apache.jackrabbit.oak.plugins.segment.SegmentNodeStore;
 import org.apache.jackrabbit.oak.spi.commit.Observer;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
-import org.apache.sling.api.resource.ResourceResolver;
-import org.apache.sling.api.resource.ResourceResolverFactory;
 import org.apache.sling.commons.testing.jcr.RepositoryUtil.RepositoryWrapper;
 import org.apache.sling.jcr.api.SlingRepository;
-import org.apache.sling.jcr.resource.internal.helper.jcr.JcrTestNodeResource;
+import org.apache.sling.spi.resource.provider.ObservationReporter;
+import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.junit.After;
 import org.junit.Before;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.ServiceRegistration;
-import org.osgi.service.event.Event;
-import org.osgi.service.event.EventAdmin;
-import org.osgi.util.tracker.ServiceTracker;
 
 
 /**
@@ -56,8 +51,7 @@ import org.osgi.util.tracker.ServiceTracker;
  */
 public class OakResourceListenerTest extends AbstractListenerTest {
 
-    private Session session;
-    private SynchronousOakResourceListener listener;
+    private OakResourceListener listener;
     private ExecutorService executor;
     private Whiteboard whiteboard;
     private SlingRepository slingRepository;
@@ -70,32 +64,7 @@ public class OakResourceListenerTest extends AbstractListenerTest {
         final Repository repository = new Jcr(oak).createRepository();
         this.slingRepository = new RepositoryWrapper(repository);
 
-        session = this.slingRepository.loginAdministrative(null);
-
-        ResourceResolver resolver = mock(ResourceResolver.class);
-        when(resolver.adaptTo(any(Class.class))).thenReturn(session);
-        when(resolver.getResource(anyString())).thenReturn(new JcrTestNodeResource(resolver, session.getNode("/"), null));
-
-        ResourceResolverFactory factory = mock(ResourceResolverFactory.class);
-        when(factory.getAdministrativeResourceResolver(anyMap())).thenReturn(resolver);
-
-        EventAdmin mockEA = new EventAdmin() {
-            public void postEvent(Event event) {
-                addEvent(event);
-            }
-
-            public void sendEvent(Event event) {
-                addEvent(event);
-            }
-        };
-
-        ServiceTracker tracker = mock(ServiceTracker.class);
-        when(tracker.getService()).thenReturn(mockEA);
-
         BundleContext bundleContext = mock(BundleContext.class);
-        when(bundleContext.createFilter(any(String.class))).thenReturn(null);
-        when(bundleContext.getServiceReference(any(String.class))).thenReturn(null);
-        when(bundleContext.getService(null)).thenReturn(mockEA);
         when(bundleContext.registerService(any(String.class), any(Object.class), any(Dictionary.class)))
                 .thenAnswer(new Answer<ServiceRegistration>() {
                     public ServiceRegistration answer(InvocationOnMock invocation) throws Throwable {
@@ -104,15 +73,22 @@ public class OakResourceListenerTest extends AbstractListenerTest {
                         return mock(ServiceRegistration.class);
                     }
                 });
-
-        listener = new SynchronousOakResourceListener(
-                this.slingRepository, bundleContext, resolver, tracker, executor);
+        listener = new OakResourceListener("/", new ProviderContext() {
+            @Override
+            public ObservationReporter getObservationReporter() {
+                return OakResourceListenerTest.this.getObservationReporter();
+            }
+            
+            @Override
+            public Set<String> getExcludedPaths() {
+                return Collections.emptySet();
+            }
+        }, bundleContext, executor, new PathMapperImpl(), 1000, slingRepository); 
     }
 
     @After
     public void tearDown() throws Exception {
-        listener.dispose();
-        session.logout();
+        listener.close();
         executor.shutdown();
     }
 

@@ -18,36 +18,54 @@
  */
 package org.apache.sling.resourceresolver.impl.providers;
 
+import static org.apache.sling.resourceresolver.impl.observation.ResourceChangeListenerWhiteboard.TOPIC_RESOURCE_CHANGE_LISTENER_UPDATE;
+import static org.osgi.service.event.EventConstants.EVENT_TOPIC;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.felix.scr.annotations.Activate;
 import org.apache.felix.scr.annotations.Component;
 import org.apache.felix.scr.annotations.Deactivate;
+import org.apache.felix.scr.annotations.Properties;
+import org.apache.felix.scr.annotations.Property;
 import org.apache.felix.scr.annotations.Reference;
 import org.apache.felix.scr.annotations.Service;
 import org.apache.sling.api.resource.runtime.dto.FailureReason;
 import org.apache.sling.api.resource.runtime.dto.ResourceProviderDTO;
 import org.apache.sling.api.resource.runtime.dto.ResourceProviderFailureDTO;
 import org.apache.sling.api.resource.runtime.dto.RuntimeDTO;
+import org.apache.sling.resourceresolver.impl.observation.BasicObservationReporter;
+import org.apache.sling.resourceresolver.impl.observation.ResourceChangeListenerWhiteboard;
+import org.apache.sling.spi.resource.provider.ObservationReporter;
+import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.apache.sling.spi.resource.provider.ResourceProvider;
 import org.osgi.framework.BundleContext;
 import org.osgi.framework.Constants;
 import org.osgi.framework.ServiceReference;
+import org.osgi.service.event.Event;
 import org.osgi.service.event.EventAdmin;
+import org.osgi.service.event.EventHandler;
 import org.osgi.util.tracker.ServiceTracker;
 import org.osgi.util.tracker.ServiceTrackerCustomizer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 @Component
-@Service(value = ResourceProviderTracker.class)
-public class ResourceProviderTracker {
+@Service({ ResourceProviderTracker.class, EventHandler.class })
+@Properties({
+        @Property(name = EVENT_TOPIC, value = TOPIC_RESOURCE_CHANGE_LISTENER_UPDATE) })
+public class ResourceProviderTracker implements EventHandler {
+
+    @SuppressWarnings("unchecked")
+    private static final ObservationReporter EMPTY_REPORTER = new BasicObservationReporter(Collections.EMPTY_MAP);
 
     private final Logger logger = LoggerFactory.getLogger(this.getClass());
 
@@ -61,14 +79,20 @@ public class ResourceProviderTracker {
 
     private final Map<ResourceProviderInfo, FailureReason> invalidProviders = new HashMap<ResourceProviderInfo, FailureReason>();
 
+    private ObservationReporter reporter = EMPTY_REPORTER;
+
     @Reference
     private EventAdmin eventAdmin;
+
+    @Reference
+    private ResourceChangeListenerWhiteboard resourceChangeListeners;
 
     private volatile ResourceProviderStorage storage;
 
     @Activate
     protected void activate(final BundleContext bundleContext) {
         this.bundleContext = bundleContext;
+        this.reporter = resourceChangeListeners.getObservationReporter();
         this.tracker = new ServiceTracker(bundleContext,
                 ResourceProvider.class.getName(),
                 new ServiceTrackerCustomizer() {
@@ -196,12 +220,12 @@ public class ResourceProviderTracker {
     }
 
     private void deactivate(final ResourceProviderHandler handler) {
-        handler.deactivate();
+        handler.deactivate(createProviderContext(handler));
         logger.debug("Deactivated resource provider {}", handler.getInfo());
     }
 
     private boolean activate(final ResourceProviderHandler handler) {
-        if ( handler.getResourceProvider() == null ) {
+        if ( !handler.activate(createProviderContext(handler)) ) {
             logger.debug("Activating resource provider {} failed", handler.getInfo());
             synchronized ( this.invalidProviders ) {
                 this.invalidProviders.put(handler.getInfo(), FailureReason.service_not_gettable);
@@ -278,5 +302,48 @@ public class ResourceProviderTracker {
         d.path = info.getPath();
         d.serviceId = (Long)info.getServiceReference().getProperty(Constants.SERVICE_ID);
         d.useResourceAccessSecurity = info.getUseResourceAccessSecurity();
+    }
+
+    @Override
+    public void handleEvent(Event event) {
+        this.reporter = resourceChangeListeners.getObservationReporter();
+        for (ResourceProviderHandler h : getHandlers()) {
+            h.getProvider().update(createProviderContext(h));
+        }
+    }
+
+    private ProviderContext createProviderContext(ResourceProviderHandler handler) {
+        final Set<String> excludedPaths = new HashSet<String>();
+        String path = handler.getInfo().getPath();
+        for (String providerPath : handlers.keySet()) {
+            if (providerPath.startsWith(path)) {
+                excludedPaths.add(providerPath);
+            }
+        }
+        excludedPaths.remove(path);
+        return new BasicProviderContext(reporter, excludedPaths);
+    }
+
+    private static class BasicProviderContext implements ProviderContext {
+
+        private final ObservationReporter observationReporter;
+        
+        private final Set<String> excludedPaths;
+
+        public BasicProviderContext(ObservationReporter observationReporter, Set<String> excludedPaths) {
+            super();
+            this.observationReporter = observationReporter;
+            this.excludedPaths = excludedPaths;
+        }
+
+        @Override
+        public ObservationReporter getObservationReporter() {
+            return observationReporter;
+        }
+
+        @Override
+        public Set<String> getExcludedPaths() {
+            return excludedPaths;
+        }
     }
 }

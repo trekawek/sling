@@ -64,8 +64,8 @@ import org.apache.sling.jcr.resource.internal.JcrModifiableValueMap;
 import org.apache.sling.jcr.resource.internal.JcrResourceListener;
 import org.apache.sling.jcr.resource.internal.NodeUtil;
 import org.apache.sling.jcr.resource.internal.OakResourceListener;
-import org.apache.sling.jcr.resource.internal.ObservationListenerSupport;
 import org.apache.sling.spi.resource.provider.JCRQueryProvider;
+import org.apache.sling.spi.resource.provider.ProviderContext;
 import org.apache.sling.spi.resource.provider.ResolveContext;
 import org.apache.sling.spi.resource.provider.ResourceProvider;
 import org.osgi.framework.BundleContext;
@@ -158,15 +158,13 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
         this.optimizeForOak = PropertiesUtil.toBoolean(context.getProperties().get(PROPERTY_OPTIMIZE_FOR_OAK), DEFAULT_OPTIMIZE_FOR_OAK);
         this.root = PropertiesUtil.toString(context.getProperties().get(ResourceProvider.PROPERTY_ROOT), "/");
         this.bundleCtx = context.getBundleContext();
-        registerLegacyListener();
-        
+
         HelperData helperData = new HelperData(dynamicClassLoaderManager.getDynamicClassLoader(), pathMapper);
         this.stateFactory = new JcrProviderStateFactory(repositoryReference, repository, helperData);
     }
-
+    
     @Deactivate
     protected void deactivate() {
-        unregisterLegacyListener();
     }
 
     @SuppressWarnings("unused")
@@ -183,7 +181,23 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
         }
     }
 
-    private void registerLegacyListener() {
+    @Override
+    public void activate(@Nonnull ProviderContext ctx) {
+        registerListener(ctx);
+    }
+
+    @Override
+    public void deactivate(@Nonnull ProviderContext ctx) {
+        unregisterListener();
+    }
+
+    @Override
+    public void update(@Nonnull ProviderContext ctx) {
+        unregisterListener();
+        registerListener(ctx);
+    }
+
+    private void registerListener(ProviderContext ctx) {
         // check for Oak
         boolean isOak = false;
         if ( optimizeForOak ) {
@@ -196,13 +210,10 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
                 }
             }
         }
-        ObservationListenerSupport support = null;
-        boolean closeSupport = true;
         try {
-            support = new ObservationListenerSupport(bundleCtx, repository);
             if (isOak) {
                 try {
-                    this.listener = new OakResourceListener(root, support, bundleCtx, executor, pathMapper, observationQueueLength);
+                    this.listener = new OakResourceListener(root, ctx, bundleCtx, executor, pathMapper, observationQueueLength, repository);
                     log.info("Detected Oak based repository. Using improved JCR Resource Listener with observation queue length {}", observationQueueLength);
                 } catch ( final RepositoryException re ) {
                     throw new SlingException("Can't create the OakResourceListener", re);
@@ -211,19 +222,14 @@ public class JcrResourceProvider extends ResourceProvider<JcrProviderState> {
                 }
             }
             if (this.listener == null) {
-                this.listener = new JcrResourceListener(root, support, pathMapper);
+                this.listener = new JcrResourceListener(ctx, root, pathMapper, repository);
             }
-            closeSupport = false;
         } catch (RepositoryException e) {
             throw new SlingException("Can't create the listener", e);
-        } finally {
-            if ( closeSupport && support != null ) {
-                support.dispose();
-            }
         }
     }
 
-    private void unregisterLegacyListener() {
+    private void unregisterListener() {
         if ( this.listener != null ) {
             try {
                 this.listener.close();

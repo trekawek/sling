@@ -202,7 +202,7 @@ public class MockedResourceResolverImplTest {
 
     public static ResourceProviderHandler createRPHandler(ResourceProvider<?> rp, String pid, long ranking,
             String path) {
-        ServiceReference ref = Mockito.mock(ServiceReference.class);        
+        ServiceReference ref = Mockito.mock(ServiceReference.class);
         BundleContext bc = Mockito.mock(BundleContext.class);
         Mockito.when(bc.getService(Mockito.eq(ref))).thenReturn(rp);
         Mockito.when(ref.getProperty(Mockito.eq(Constants.SERVICE_ID))).thenReturn(new Random().nextLong());
@@ -214,7 +214,7 @@ public class MockedResourceResolverImplTest {
         Mockito.when(ref.getProperty(Mockito.eq(ResourceProvider.PROPERTY_ADAPTABLE))).thenReturn(true);
 
         ResourceProviderInfo info = new ResourceProviderInfo(ref);
-        return new ResourceProviderHandler(bc, info, new EventAdmin() {
+        ResourceProviderHandler h = new ResourceProviderHandler(bc, info, new EventAdmin() {
             @Override
             public void sendEvent(Event event) {
             }
@@ -222,6 +222,8 @@ public class MockedResourceResolverImplTest {
             public void postEvent(Event event) {
             }
         });
+        h.activate(null);
+        return h;
     }
 
     @SuppressWarnings("unchecked")

@@ -111,7 +111,7 @@ public class ResourceProviderAuthenticator {
     }
 
     private StatefulResourceProvider createStateful(ResourceProviderHandler handler) throws LoginException {
-        ResourceProvider<?> rp = handler.getResourceProvider();
+        ResourceProvider<?> rp = handler.getProvider();
         if (rp == null) {
             logger.warn("Empty resource provider for {}", handler);
             return null;

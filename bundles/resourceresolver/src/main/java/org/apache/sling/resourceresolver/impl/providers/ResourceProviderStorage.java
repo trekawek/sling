@@ -64,10 +64,10 @@ public class ResourceProviderStorage {
             if (info.isRefreshable()) {
                 this.refreshableHandlers.add(h);
             }
-            if (h.getResourceProvider().getJCRQueryProvider() != null) {
+            if (h.getProvider().getJCRQueryProvider() != null) {
                 this.jcrQuerableHandlers.add(h);
             }
-            if (h.getResourceProvider().getQueryProvider() != null) {
+            if (h.getProvider().getQueryProvider() != null) {
                 this.nativeQuerableHandlers.add(h);
             }
         }
