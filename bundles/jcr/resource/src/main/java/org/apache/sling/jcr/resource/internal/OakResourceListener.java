@@ -67,6 +67,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
 
     private final Session session;
 
+    @SuppressWarnings("deprecation")
     public OakResourceListener(
             final String mountPrefix,
             final ProviderContext ctx,
@@ -80,7 +81,7 @@ public class OakResourceListener extends NodeObserver implements Closeable {
         this.ctx = ctx;
         this.pathMapper = pathMapper;
         this.mountPrefix = mountPrefix;
-        this.session = repository.login(repository.getDefaultWorkspace());
+        this.session = repository.loginAdministrative(repository.getDefaultWorkspace());
 
         final Hashtable<String, Object> props = new Hashtable<String, Object>();
         props.put(Constants.SERVICE_VENDOR, "The Apache Software Foundation");
