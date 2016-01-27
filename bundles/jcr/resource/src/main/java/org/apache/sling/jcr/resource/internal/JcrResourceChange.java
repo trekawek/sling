@@ -41,13 +41,13 @@ public class JcrResourceChange extends ResourceChange {
     public String toString() {
         StringBuilder b = new StringBuilder();
         b.append("ResourceChange[type=").append(this.getType()).append(", path=").append(this.getPath());
-        if (!getAddedPropertyNames().isEmpty()) {
+        if (getAddedPropertyNames() != null && !getAddedPropertyNames().isEmpty()) {
             b.append(", added=").append(getAddedPropertyNames());
         }
-        if (!getChangedPropertyNames().isEmpty()) {
+        if (getChangedPropertyNames() != null && !getChangedPropertyNames().isEmpty()) {
             b.append(", changed=").append(getChangedPropertyNames());
         }
-        if (!getRemovedPropertyNames().isEmpty()) {
+        if (getRemovedPropertyNames() != null && !getRemovedPropertyNames().isEmpty()) {
             b.append(", removed=").append(getRemovedPropertyNames());
         }
         b.append("]");
