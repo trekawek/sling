@@ -78,7 +78,7 @@ public class OakResourceListenerTest extends AbstractListenerTest {
             public ObservationReporter getObservationReporter() {
                 return OakResourceListenerTest.this.getObservationReporter();
             }
-            
+
             @Override
             public PathSet getExcludedPaths() {
                 return PathSet.fromPaths();

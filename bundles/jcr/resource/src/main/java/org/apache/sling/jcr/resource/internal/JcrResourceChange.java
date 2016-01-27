@@ -53,7 +53,7 @@ public class JcrResourceChange extends ResourceChange {
         b.append("]");
         return b.toString();
     }
-    
+
     public static class Builder {
 
         private String path;
