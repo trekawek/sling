@@ -67,7 +67,9 @@ public class OakResourceListenerTest extends AbstractListenerTest {
                 .thenAnswer(new Answer<ServiceRegistration>() {
                     public ServiceRegistration answer(InvocationOnMock invocation) throws Throwable {
                         Object[] arguments = invocation.getArguments();
-                        registerObserver(whiteboard, (Observer) arguments[1]);
+                        if (arguments[1] instanceof Observer) {
+                            registerObserver(whiteboard, (Observer) arguments[1]);
+                        }
                         return mock(ServiceRegistration.class);
                     }
                 });
